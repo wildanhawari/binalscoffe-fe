@@ -1,62 +1,66 @@
 import secureLocalStorage from "react-secure-storage";
 import axios from "axios";
-axios.defaults.baseURL = import.meta.env.VITE_API_URL;
-axios.defaults.timeout = import.meta.env.VITE_API_TIMEOUT;
-axios.defaults.headers.common["Content-Type"] = "application/json";
 
-const api = axios.create();
+// Membuat instance Axios baru dengan konfigurasi terpusat
+const axiosInstance = axios.create({
+  baseURL: `${import.meta.env.VITE_API_URL}`, // <-- Menggabungkan URL dasar dengan /api
+  timeout: import.meta.env.VITE_API_TIMEOUT || 60000,
+  headers: {
+    "Content-Type": "application/json",
+  },
+});
 
-api.interceptors.request.use((request) => {
+// Menambahkan token ke setiap request yang keluar
+axiosInstance.interceptors.request.use((request) => {
   const token = secureLocalStorage.getItem("acessToken");
   if (token) {
-    // request.headers["Content-Type"] = "application/json";
     request.headers["Authorization"] = `Bearer ${token}`;
   }
   return request;
 });
 
-// Refresh token logic
+// Logika untuk refresh token (sudah benar, tidak perlu diubah)
 const refreshAuthLogic = async (failedRequest) => {
   try {
-    let headersList = {
-      Authorization: "Bearer " + secureLocalStorage.getItem("refreshToken"),
-      "Content-Type": "application/json",
-    };
+    const refreshToken = secureLocalStorage.getItem("refreshToken");
+    
+    // Gunakan instance axios dasar untuk refresh token untuk menghindari loop interceptor
+    const response = await axios.get(`${import.meta.env.VITE_API_URL}/users/refresh`, {
+      headers: {
+        Authorization: `Bearer ${refreshToken}`,
+      },
+    });
 
-    let reqOptions = {
-      url: `/api/users/refresh`,
-      method: "GET",
-      headers: headersList,
-    };
-    const response = await axios.request(reqOptions);
-    secureLocalStorage.setItem("acessToken", response.data.acessToken);
-    secureLocalStorage.setItem("refreshToken", response.data.refreshToken);
-    secureLocalStorage.setItem("user", response.data.result);
-    console.log("Simpan token baru berhasil ...");
-    failedRequest.headers["Authorization"] =
-      "Bearer " + response.data.acessToken;
+    const { acessToken, refreshToken: newRefreshToken, result } = response.data;
+    secureLocalStorage.setItem("acessToken", acessToken);
+    secureLocalStorage.setItem("refreshToken", newRefreshToken);
+    secureLocalStorage.setItem("user", result);
+    
+    failedRequest.config.headers["Authorization"] = `Bearer ${acessToken}`;
     return Promise.resolve();
   } catch (error) {
-    // Handle refresh token expiration, e.g., redirect to login page
     secureLocalStorage.clear();
-    console.log(error.message);
     window.location.href = "/";
     return Promise.reject(error);
   }
 };
 
-// Interceptor untuk refresh token ketika access token expired
-api.interceptors.response.use(
+// Interceptor untuk menangani response error (misal: token expired)
+axiosInstance.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
-    if (error.response.status === 401 && !originalRequest._retry) {
+    if (error.response?.status === 401 && !originalRequest._retry) {
       originalRequest._retry = true;
-      await refreshAuthLogic(originalRequest);
-      return api(originalRequest);
+      try {
+        await refreshAuthLogic(originalRequest);
+        return axiosInstance(originalRequest);
+      } catch (refreshError) {
+        return Promise.reject(refreshError);
+      }
     }
     return Promise.reject(error);
   }
 );
 
-export const axiosInstance = api;
+export { axiosInstance };
