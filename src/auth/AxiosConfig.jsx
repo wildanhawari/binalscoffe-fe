@@ -3,7 +3,7 @@ import axios from "axios";
 
 // Membuat instance Axios baru dengan konfigurasi terpusat
 const axiosInstance = axios.create({
-  baseURL: `${import.meta.env.VITE_API_URL}`, // <-- Menggabungkan URL dasar dengan /api
+  baseURL: import.meta.env.VITE_API_URL,
   timeout: import.meta.env.VITE_API_TIMEOUT || 60000,
   headers: {
     "Content-Type": "application/json",
